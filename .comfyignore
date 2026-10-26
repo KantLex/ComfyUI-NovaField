@@ -1,0 +1,3 @@
+# Left out of the Registry package (ComfyUI never loads these).
+tests/
+.github/

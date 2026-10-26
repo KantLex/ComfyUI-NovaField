@@ -1,0 +1,23 @@
+[project]
+name = "comfyui-novafield"
+version = "0.2.0"
+description = "NovaField nodes for ComfyUI: ghost-rig camera guide videos (with stand-ins and follow cams), film stock and lens looks, keyframed box/ellipse track masks and contact sheets. Pure torch + numpy, no extra requirements."
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+dependencies = []
+
+[project.urls]
+# The standalone pack repo (mirrored from the NovaField app repo). Change it if you publish elsewhere.
+Repository = "https://github.com/KantLex/ComfyUI-NovaField"
+
+[tool.comfy]
+# Your publisher id on registry.comfy.org. Claim it there (or change this) before the first publish.
+PublisherId = "novafield"
+DisplayName = "NovaField"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.uv]
+# Not a uv-managed project: `uv run --with ... pytest` uses an ephemeral env, no local .venv.
+managed = false
