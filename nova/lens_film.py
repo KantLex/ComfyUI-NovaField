@@ -3,7 +3,8 @@
 Pipeline per frame (each stage is skipped entirely when its control is 0):
 
 1. look grade (exposure, channel mix, saturation, S tone curve, black/white levels,
-   split toning, look-specific extras), blended with the input by ``intensity``
+   split toning, look-specific extras), blended with the input by ``intensity``;
+   then the colour corrections (exposure, temperature/tint, saturation, contrast, fade)
 2. geometric: gate weave (per-frame subpixel translation, smooth seeded random walk)
    + chromatic aberration (radial RGB scale), one bilinear resample per channel
 3. halation: blurred highlights tinted red-orange, added back
@@ -25,7 +26,9 @@ import torch.nn.functional as F
 
 from .util import blur, gaussian_kernel1d, _conv_axis, luma, smoothstep
 
-LOOKS = ["none", "kodak_2383", "fuji_eterna", "bleach_bypass", "teal_orange", "noir", "technicolor", "moonlight", "vhs_1989"]
+LOOKS = ["none", "kodak_2383", "fuji_eterna", "bleach_bypass", "teal_orange", "noir", "technicolor", "moonlight", "vhs_1989",
+         "kodak_portra_400", "kodak_vision3_500t", "ektachrome_e100", "cinestill_800t", "fuji_velvia_50", "kodachrome_64",
+         "ilford_hp5", "instant_film", "super8"]
 
 _I = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
 
@@ -90,6 +93,69 @@ LOOK_PARAMS: Dict[str, Dict] = {
         black=(0.060, 0.050, 0.075), white=(0.94, 0.93, 0.91),
         shadow=(0.012, -0.010, 0.030), highlight=(0.025, 0.004, -0.020),
         vhs=True,
+    ),
+    "kodak_portra_400": dict(
+        exposure=1.02,
+        mix=[[1.03, -0.01, -0.02], [-0.01, 1.01, 0.00], [-0.02, -0.02, 1.04]],
+        sat=0.9, contrast=1.12, pivot=0.45,
+        black=(0.030, 0.028, 0.030), white=(0.98, 0.96, 0.92),
+        shadow=(-0.010, 0.008, 0.012), highlight=(0.030, 0.015, -0.020),
+    ),
+    "kodak_vision3_500t": dict(
+        exposure=1.0,
+        mix=[[1.02, -0.01, -0.01], [-0.01, 1.00, 0.01], [0.00, -0.02, 1.02]],
+        sat=0.95, contrast=1.22, pivot=0.43,
+        black=(0.012, 0.020, 0.030), white=(0.97, 0.95, 0.92),
+        shadow=(-0.025, 0.004, 0.030), highlight=(0.030, 0.012, -0.025),
+    ),
+    "ektachrome_e100": dict(
+        exposure=0.98,
+        mix=[[1.02, -0.02, 0.00], [-0.02, 1.03, -0.01], [-0.01, -0.02, 1.08]],
+        sat=1.2, contrast=1.4, pivot=0.48,
+        black=(0.005, 0.008, 0.014), white=(0.99, 0.99, 1.0),
+        shadow=(-0.010, 0.0, 0.020), highlight=(0.0, 0.006, 0.012),
+    ),
+    "cinestill_800t": dict(
+        exposure=1.0,
+        mix=[[0.98, 0.02, 0.00], [0.00, 1.00, 0.00], [0.00, 0.04, 1.04]],
+        sat=1.05, contrast=1.25, pivot=0.42,
+        black=(0.0, 0.020, 0.035), white=(1.0, 0.95, 0.90),
+        shadow=(-0.050, 0.012, 0.050), highlight=(0.045, 0.010, -0.030),
+    ),
+    "fuji_velvia_50": dict(
+        exposure=0.97,
+        mix=[[1.12, -0.08, -0.04], [-0.06, 1.14, -0.08], [-0.03, -0.08, 1.11]],
+        sat=1.4, contrast=1.5, pivot=0.47,
+        black=(0.004, 0.006, 0.010), white=(1.0, 0.99, 0.97),
+        shadow=(0.0, 0.006, 0.012), highlight=(0.010, 0.010, -0.010),
+    ),
+    "kodachrome_64": dict(
+        exposure=1.0,
+        mix=[[1.10, -0.06, -0.04], [-0.04, 1.04, 0.00], [-0.02, -0.06, 1.02]],
+        sat=1.15, contrast=1.38, pivot=0.44,
+        black=(0.014, 0.010, 0.012), white=(0.99, 0.96, 0.86),
+        shadow=(0.0, -0.004, 0.016), highlight=(0.030, 0.020, -0.040),
+    ),
+    "ilford_hp5": dict(
+        exposure=1.0,
+        mono=(0.30, 0.59, 0.11),
+        mix=_I, sat=0.0, contrast=1.35, pivot=0.45,
+        black=(0.025, 0.025, 0.025), white=(0.97, 0.97, 0.97),
+        shadow=(0.0, 0.0, 0.0), highlight=(0.0, 0.0, 0.0),
+    ),
+    "instant_film": dict(
+        exposure=1.04,
+        mix=[[0.98, 0.04, -0.02], [0.02, 1.00, -0.02], [0.00, 0.06, 0.90]],
+        sat=0.82, contrast=0.9, pivot=0.5,
+        black=(0.090, 0.100, 0.080), white=(0.95, 0.94, 0.86),
+        shadow=(-0.010, 0.020, 0.0), highlight=(0.030, 0.020, -0.030),
+    ),
+    "super8": dict(
+        exposure=1.03,
+        mix=[[1.04, 0.00, -0.04], [0.00, 1.00, -0.02], [-0.02, 0.02, 0.88]],
+        sat=0.92, contrast=1.15, pivot=0.48,
+        black=(0.060, 0.045, 0.030), white=(0.97, 0.92, 0.80),
+        shadow=(0.010, 0.0, -0.010), highlight=(0.040, 0.020, -0.040),
     ),
 }
 
@@ -171,6 +237,29 @@ def grade(x: torch.Tensor, look: str) -> torch.Tensor:
     return y.clamp(0.0, 1.0)
 
 
+# =========================================================================== colour
+def adjust(x: torch.Tensor, exposure: float = 0.0, contrast: float = 0.0, saturation: float = 0.0,
+           temperature: float = 0.0, tint: float = 0.0, fade: float = 0.0) -> torch.Tensor:
+    """Colour corrections after the look. Each control is neutral at 0 (and skipped).
+
+    exposure in stops; temperature warms (+) or cools (-); tint goes magenta (+) or green (-);
+    contrast is an S-curve around mid grey; fade lifts the blacks and dims the whites.
+    """
+    if exposure:
+        x = x * (2.0 ** exposure)
+    if temperature or tint:
+        gain = (1 + 0.12 * temperature + 0.04 * tint, 1 - 0.12 * tint, 1 - 0.12 * temperature + 0.04 * tint)
+        x = x * _vec(gain, x)
+    if saturation:
+        L = luma(x)
+        x = L + (x - L) * (1 + saturation)
+    if contrast:
+        x = _s_curve(x, 2.0 ** contrast, 0.5)
+    if fade:
+        x = 0.1 * fade + x.clamp(0.0, 1.0) * (1 - 0.25 * fade)
+    return x.clamp(0.0, 1.0)
+
+
 # =========================================================================== gate weave
 def weave_offsets(n_frames: int, seed: int) -> np.ndarray:
     """(F,2) smooth random walk (OU process + 5-tap smoothing), roughly unit std."""
@@ -236,10 +325,10 @@ def _vignette(x: torch.Tensor, amount: float) -> torch.Tensor:
     return x * v.view(1, H, W, 1)
 
 
-def _grain(x: torch.Tensor, amount: float, seed: int, frame0: int) -> torch.Tensor:
+def _grain(x: torch.Tensor, amount: float, seed: int, frame0: int, size: float = 1.0) -> torch.Tensor:
     N, H, W, _ = x.shape
     dev = x.device
-    sig = 0.55 * max(1.0, H / 720.0)
+    sig = 0.55 * max(1.0, H / 720.0) * size
     k = gaussian_kernel1d(sig, torch.device("cpu"), torch.float64)
     norm = float((k * k).sum())  # std of separably blurred unit white noise
     noises = []
@@ -259,19 +348,25 @@ def _grain(x: torch.Tensor, amount: float, seed: int, frame0: int) -> torch.Tens
 
 # =========================================================================== entry
 def is_identity(look: str, intensity: float, grain: float, halation: float, vignette: float,
-                chromatic: float, gate_weave: float, anamorphic_streak: float) -> bool:
+                chromatic: float, gate_weave: float, anamorphic_streak: float, exposure: float = 0.0,
+                contrast: float = 0.0, saturation: float = 0.0, temperature: float = 0.0, tint: float = 0.0,
+                fade: float = 0.0) -> bool:
     graded = look != "none" and intensity > 0
-    return not graded and max(grain, halation, vignette, chromatic, gate_weave, anamorphic_streak) <= 0
+    corrected = any((exposure, contrast, saturation, temperature, tint, fade))
+    return not graded and not corrected and max(grain, halation, vignette, chromatic, gate_weave, anamorphic_streak) <= 0
 
 
 def apply(images: torch.Tensor, look: str = "none", intensity: float = 0.8, grain: float = 0.0,
           halation: float = 0.0, vignette: float = 0.0, chromatic: float = 0.0, gate_weave: float = 0.0,
           anamorphic_streak: float = 0.0, seed: int = 0, device=None, chunk: int = 16,
-          progress=None) -> torch.Tensor:
+          progress=None, *, exposure: float = 0.0, contrast: float = 0.0, saturation: float = 0.0,
+          temperature: float = 0.0, tint: float = 0.0, fade: float = 0.0, grain_size: float = 1.0) -> torch.Tensor:
     """images [B,H,W,3] float 0..1 -> same shape, float32 on CPU."""
     if look not in LOOKS:
         raise ValueError(f"unknown look {look!r} (expected one of {LOOKS})")
-    if is_identity(look, intensity, grain, halation, vignette, chromatic, gate_weave, anamorphic_streak):
+    corrections = dict(exposure=float(exposure), contrast=float(contrast), saturation=float(saturation),
+                       temperature=float(temperature), tint=float(tint), fade=float(fade))
+    if is_identity(look, intensity, grain, halation, vignette, chromatic, gate_weave, anamorphic_streak, **corrections):
         return images
     if device is None:
         device = torch.device("cpu")
@@ -288,6 +383,8 @@ def apply(images: torch.Tensor, look: str = "none", intensity: float = 0.8, grai
         if look != "none" and intensity > 0:
             g = grade(x, look)
             x = x + (g - x) * float(intensity)
+        if any(corrections.values()):
+            x = adjust(x, **corrections)
         if chromatic > 0 or shifts_all is not None:
             sh = shifts_all[s0:s1].to(device) if shifts_all is not None else None
             x = _warp(x, float(chromatic), sh)
@@ -298,7 +395,7 @@ def apply(images: torch.Tensor, look: str = "none", intensity: float = 0.8, grai
         if vignette > 0:
             x = _vignette(x, float(vignette))
         if grain > 0:
-            x = _grain(x, float(grain), seed, s0)
+            x = _grain(x, float(grain), seed, s0, float(grain_size))
         out[s0:s1] = x.clamp(0.0, 1.0).cpu()
         if progress:
             progress(s1, B)

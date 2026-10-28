@@ -56,8 +56,14 @@ def test_input_contract():
     assert list(lf) == ["images", "look", "intensity", "grain", "halation", "vignette", "chromatic",
                         "gate_weave", "anamorphic_streak", "seed"]
     assert lf["look"][0] == ["none", "kodak_2383", "fuji_eterna", "bleach_bypass", "teal_orange", "noir",
-                             "technicolor", "moonlight", "vhs_1989"]
+                             "technicolor", "moonlight", "vhs_1989", "kodak_portra_400", "kodak_vision3_500t",
+                             "ektachrome_e100", "cinestill_800t", "fuji_velvia_50", "kodachrome_64", "ilford_hp5",
+                             "instant_film", "super8"]
     assert lf["intensity"][1]["default"] == 0.8
+    # 0.3.0 controls are optional and neutral, so graphs from earlier versions keep working.
+    lo = nodes.NovaLensFilm.INPUT_TYPES()["optional"]
+    assert list(lo) == ["exposure", "contrast", "saturation", "temperature", "tint", "fade", "grain_size"]
+    assert [lo[k][1]["default"] for k in lo] == [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]
 
     bt = nodes.NovaBoxTrackMask.INPUT_TYPES()
     assert list(bt["required"]) == ["track", "width", "height", "frames", "feather", "expand"]
@@ -144,8 +150,42 @@ def test_lens_film_looks(look):
     (g,) = nodes.NovaLensFilm().apply(x, look, 1.0, 0, 0, 0, 0, 0, 0, 7)
     if look != "none":
         assert float((g - x).abs().mean()) > 0.01  # the look does something
-    if look == "noir":
+    if look in ("noir", "ilford_hp5"):
         assert torch.allclose(g[..., 0], g[..., 1], atol=1e-5) and torch.allclose(g[..., 1], g[..., 2], atol=1e-5)
+
+
+def test_lens_film_colour_controls():
+    x = _test_clip()
+    film = nodes.NovaLensFilm()
+    base = (x, "none", 0.8, 0, 0, 0, 0, 0, 0, 3)
+    # Neutral controls hand the frames back untouched.
+    (y,) = film.apply(*base, exposure=0.0, contrast=0.0, saturation=0.0, temperature=0.0, tint=0.0, fade=0.0, grain_size=2.0)
+    assert torch.max((y - x).abs()) <= 1e-6
+    mean = lambda t: t.mean(dim=(0, 1, 2))
+    (brighter,) = film.apply(*base, exposure=1.0)
+    assert float(brighter.mean()) > float(x.mean())
+    (warm,) = film.apply(*base, temperature=1.0)
+    assert mean(warm)[0] > mean(x)[0] and mean(warm)[2] < mean(x)[2]
+    (magenta,) = film.apply(*base, tint=1.0)
+    assert mean(magenta)[1] < mean(x)[1]
+    (grey,) = film.apply(*base, saturation=-1.0)
+    assert torch.allclose(grey[..., 0], grey[..., 1], atol=1e-5)
+    (punchy,) = film.apply(*base, contrast=1.0)
+    assert float(punchy.std()) > float(x.std())
+    (faded,) = film.apply(*base, fade=1.0)
+    assert float(faded.min()) >= 0.099 and float(faded.max()) <= 0.851
+    for c in (brighter, warm, magenta, grey, punchy, faded):
+        check_image(c, x.shape)
+
+
+def test_lens_film_grain_size():
+    x = _test_clip(B=2)
+    film = nodes.NovaLensFilm()
+    (fine,) = film.apply(x, "none", 0.8, 1.0, 0, 0, 0, 0, 0, 4)
+    (coarse,) = film.apply(x, "none", 0.8, 1.0, 0, 0, 0, 0, 0, 4, grain_size=3.0)
+    # Bigger grain is smoother from one pixel to the next.
+    step = lambda t: float(((t - x)[:, :, 1:] - (t - x)[:, :, :-1]).abs().mean())
+    assert step(coarse) < step(fine)
 
 
 def test_lens_film_effects_individually_and_seeded():

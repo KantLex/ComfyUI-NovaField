@@ -77,18 +77,25 @@ starfield ≈ 0.3 s, parallax ≈ 10 s. On CUDA, frames are processed in chunks 
 
 ### NovaLensFilm: film looks and lens character
 Inputs: `images`, `look` (`none`, `kodak_2383`, `fuji_eterna`, `bleach_bypass`, `teal_orange`, `noir`,
-`technicolor`, `moonlight`, `vhs_1989`), `intensity` 0–1 (blends the look's grade), `grain`,
-`halation`, `vignette`, `chromatic`, `gate_weave`, `anamorphic_streak` (each 0–1), `seed`.
+`technicolor`, `moonlight`, `vhs_1989`, `kodak_portra_400`, `kodak_vision3_500t`, `ektachrome_e100`,
+`cinestill_800t`, `fuji_velvia_50`, `kodachrome_64`, `ilford_hp5`, `instant_film`, `super8`),
+`intensity` 0–1 (blends the look's grade), `grain`, `halation`, `vignette`, `chromatic`, `gate_weave`,
+`anamorphic_streak` (each 0–1), `seed`.
+Optional (0.3.0, neutral by default): `exposure` (stops, −2–2), `contrast`, `saturation`, `temperature`,
+`tint` (each −1–1), `fade` 0–1 and `grain_size` 0.5–3 (default 1).
 Output: `images` with the same shape. Frames run on the GPU in chunks of 16.
 
-* Each look has its own tone curve, channel mix and split toning. `noir` is monochrome with deep contrast,
-  and `vhs_1989` adds chroma bleed and scanline softness.
+* Each look has its own tone curve, channel mix and split toning. `noir` and `ilford_hp5` are monochrome
+  (`noir` with deeper contrast), and `vhs_1989` adds chroma bleed and scanline softness.
+* The colour controls run after the look: `exposure` in stops, `temperature` warms (+) or cools (−),
+  `tint` goes magenta (+) or green (−), `contrast` is an S-curve around mid grey, and `fade` lifts the
+  blacks and dims the whites. `grain_size` scales the grain's blur.
 * `grain` is seeded, changes every frame and depends on luminance (strongest in the midtones).
 * `halation` adds blurred highlights back, tinted red-orange. `anamorphic_streak` adds very bright
   pixels blurred horizontally and tinted blue.
 * `chromatic` scales the R and B channels radially. `gate_weave` is a smooth, seeded subpixel
   random walk applied per frame. `vignette` is a smooth elliptical falloff.
-* With look `none` and every slider at 0, the input is returned unchanged.
+* With look `none`, every slider at 0 and the colour controls neutral, the input is returned unchanged.
 
 ### NovaBoxTrackMask: keyframed track to mask
 `track` JSON: `{"shape":"ellipse"|"box","keys":[{"f":0,"x":0.4,"y":0.3,"w":0.2,"h":0.4}, ...]}`

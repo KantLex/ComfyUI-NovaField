@@ -67,6 +67,7 @@ class NovaLensFilm:
     @classmethod
     def INPUT_TYPES(cls):
         f01 = lambda d=0.0: ("FLOAT", {"default": d, "min": 0.0, "max": 1.0, "step": 0.01})
+        fpm = lambda: ("FLOAT", {"default": 0.0, "min": -1.0, "max": 1.0, "step": 0.01})
         return {
             "required": {
                 "images": ("IMAGE",),
@@ -79,7 +80,18 @@ class NovaLensFilm:
                 "gate_weave": f01(),
                 "anamorphic_streak": f01(),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xFFFFFFFFFFFFFFFF}),
-            }
+            },
+            # Colour corrections and grain size (0.3.0). Optional and neutral by default, so graphs
+            # made for earlier versions run unchanged.
+            "optional": {
+                "exposure": ("FLOAT", {"default": 0.0, "min": -2.0, "max": 2.0, "step": 0.05}),
+                "contrast": fpm(),
+                "saturation": fpm(),
+                "temperature": fpm(),
+                "tint": fpm(),
+                "fade": f01(),
+                "grain_size": ("FLOAT", {"default": 1.0, "min": 0.5, "max": 3.0, "step": 0.05}),
+            },
         }
 
     RETURN_TYPES = ("IMAGE",)
@@ -87,12 +99,15 @@ class NovaLensFilm:
     FUNCTION = "apply"
     CATEGORY = CATEGORY
 
-    def apply(self, images, look, intensity, grain, halation, vignette, chromatic, gate_weave, anamorphic_streak, seed):
+    def apply(self, images, look, intensity, grain, halation, vignette, chromatic, gate_weave, anamorphic_streak, seed,
+              exposure=0.0, contrast=0.0, saturation=0.0, temperature=0.0, tint=0.0, fade=0.0, grain_size=1.0):
         out = lens_film.apply(
             images, look=look, intensity=float(intensity), grain=float(grain), halation=float(halation),
             vignette=float(vignette), chromatic=float(chromatic), gate_weave=float(gate_weave),
             anamorphic_streak=float(anamorphic_streak), seed=int(seed), device=get_device(),
             progress=_progress(int(images.shape[0])),
+            exposure=float(exposure), contrast=float(contrast), saturation=float(saturation),
+            temperature=float(temperature), tint=float(tint), fade=float(fade), grain_size=float(grain_size),
         )
         return (out,)
 
