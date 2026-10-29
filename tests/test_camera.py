@@ -124,10 +124,21 @@ def test_fixtures_match_implementation():
             assert np.allclose(np.array(got), np.array(case["prop_corners"]), atol=1e-12, rtol=0)
 
 
+def _same(a, b):
+    """Equal, with floats allowed to differ in their last digits (libm differs between platforms)."""
+    if isinstance(a, dict):
+        return isinstance(b, dict) and a.keys() == b.keys() and all(_same(a[k], b[k]) for k in a)
+    if isinstance(a, list):
+        return isinstance(b, list) and len(a) == len(b) and all(map(_same, a, b))
+    if isinstance(a, float) or isinstance(b, float):
+        return math.isclose(a, b, rel_tol=1e-12, abs_tol=1e-12)
+    return a == b
+
+
 def test_fixture_file_is_up_to_date():
     import make_fixtures
 
-    assert json.loads(FIXTURES.read_text()) == json.loads(json.dumps(make_fixtures.build()))
+    assert _same(json.loads(FIXTURES.read_text()), json.loads(json.dumps(make_fixtures.build())))
 
 
 def _walk_path(**extra):
