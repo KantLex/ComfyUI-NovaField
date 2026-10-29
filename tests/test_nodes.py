@@ -6,7 +6,7 @@ import torch
 
 import comfyui_novafield as pkg
 from comfyui_novafield import nodes
-from comfyui_novafield.nova import box_track, contact_sheet, ghost_rig, lens_film
+from comfyui_novafield.nova import box_track, contact_sheet, ghost_rig, lens_film, match_color, shot_qc, shutter
 
 
 def small_path(frames=6):
@@ -30,7 +30,7 @@ def check_image(x, shape):
 
 
 def test_mappings():
-    names = {"NovaGhostRig", "NovaLensFilm", "NovaBoxTrackMask", "NovaContactSheet"}
+    names = {"NovaGhostRig", "NovaLensFilm", "NovaBoxTrackMask", "NovaContactSheet", "NovaMatchColor", "NovaShutter", "NovaShotQC"}
     assert set(pkg.NODE_CLASS_MAPPINGS) == names
     assert set(pkg.NODE_DISPLAY_NAME_MAPPINGS) == names
     assert pkg.WEB_DIRECTORY is None
@@ -323,3 +323,110 @@ def test_ghost_rig_draws_props():
     stars_a, _ = nodes.NovaGhostRig().render(json.dumps(base), 64, 48, "starfield", 1.0)
     stars_b, _ = nodes.NovaGhostRig().render(json.dumps(with_prop), 64, 48, "starfield", 1.0)
     assert torch.equal(stars_a, stars_b)
+
+
+# ----------------------------------------------------------------------------- continuity match
+def test_lab_round_trip_and_known_values():
+    rgb = torch.tensor([[1.0, 1.0, 1.0], [1.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.2, 0.5, 0.8]])
+    lab = match_color.srgb_to_lab(rgb)
+    assert torch.allclose(lab[0], torch.tensor([100.0, 0.0, 0.0]), atol=0.05)
+    assert torch.allclose(lab[1], torch.tensor([53.24, 80.09, 67.20]), atol=0.05)
+    assert torch.allclose(match_color.lab_to_srgb(lab), rgb, atol=1e-4)
+
+
+def test_match_moves_a_clip_to_the_reference_colour():
+    g = torch.Generator().manual_seed(1)
+    clip = (torch.rand(4, 32, 48, 3, generator=g) * 0.5 + torch.tensor([0.1, 0.2, 0.5])).clamp(0, 1)  # cool
+    ref = (torch.rand(1, 40, 40, 3, generator=g) * 0.5 + torch.tensor([0.5, 0.3, 0.1])).clamp(0, 1)  # warm
+    (out,) = nodes.NovaMatchColor().apply(clip, ref, 1.0, False)
+    check_image(out, clip.shape)
+    mu_o, _ = match_color.stats(out)
+    mu_r, _ = match_color.stats(ref)
+    mu_c, _ = match_color.stats(clip)
+    assert (mu_o - mu_r).abs().sum() < (mu_c - mu_r).abs().sum() * 0.25
+    # the same correction on every frame: identical frames stay identical
+    same = clip[:1].repeat(3, 1, 1, 1)
+    (o2,) = nodes.NovaMatchColor().apply(same, ref, 1.0, False)
+    assert torch.allclose(o2[0], o2[2])
+    # amount 0 is the clip untouched; colour_only keeps its lightness
+    (none,) = nodes.NovaMatchColor().apply(clip, ref, 0.0, False)
+    assert torch.equal(none, clip)
+    (col,) = nodes.NovaMatchColor().apply(clip, ref, 1.0, True)
+    assert abs(float(match_color.stats(col)[0][0] - mu_c[0])) < 1.5
+
+
+# ----------------------------------------------------------------------------- shutter
+def _moving_dot(n=9, size=32, width=None):
+    x = torch.zeros(n, size, width or size, 3)
+    for i in range(n):
+        x[i, 14:18, 2 + 3 * i : 6 + 3 * i] = 1.0
+    return x
+
+
+def test_shutter_counts_and_identity():
+    x = _moving_dot()
+    assert shutter.source_frames(x.shape[0], 1) == 9
+    assert shutter.source_frames(33, 4) == 9
+    (out, n) = nodes.NovaShutter().apply(x, 1, 0.0, 1.0)
+    assert n == 9 and torch.equal(out, x)  # closed shutter, normal speed: frames untouched
+    assert shutter.output_frames(9, 0.5) == 17 and shutter.output_frames(9, 2.0) == 5
+
+
+def test_shutter_blurs_along_the_motion():
+    sub = _moving_dot(n=33, width=128)  # pretend: 9 frames interpolated 4x
+    (sharp, _) = nodes.NovaShutter().apply(sub, 4, 0.0, 1.0)
+    (blur, n) = nodes.NovaShutter().apply(sub, 4, 180.0, 1.0)
+    assert n == 9
+    check_image(blur, (9, 32, 128, 3))
+    # the blurred dot covers more pixels, at lower peak brightness
+    assert int((blur[4] > 0.05).sum()) > int((sharp[4] > 0.05).sum())
+    assert float(blur[4].max()) <= 1.0
+
+
+def test_shutter_slow_motion_uses_in_between_frames():
+    sub = _moving_dot(n=33, width=128)
+    (slow, n) = nodes.NovaShutter().apply(sub, 4, 0.0, 0.5)
+    assert n == 17
+    assert torch.equal(slow[1], sub[2])  # output frame 1 is half a source frame in: sub-frame 2
+
+
+# ----------------------------------------------------------------------------- shot QC
+def _smooth(seed):
+    """A soft random picture, wider than the frame, so a pan is a small change (like real footage)."""
+    g = torch.Generator().manual_seed(seed)
+    small = torch.rand(1, 3, 6, 12, generator=g)
+    return torch.nn.functional.interpolate(small, size=(48, 112), mode="bilinear", align_corners=False).permute(0, 2, 3, 1)
+
+
+def _pan(base, n):
+    return torch.cat([base[:, :, i : i + 64] for i in range(n)])
+
+
+def _clip_with_faults():
+    base = _smooth(3)
+    x = _pan(base * 0.8 + 0.1, 30)
+    x[10] = x[9]  # frozen
+    x[11] = x[9]
+    x[20] = 1 - x[20]  # jump
+    x[25] = (x[25] + 0.25).clamp(0, 1)  # flicker
+    return x
+
+
+def test_shot_qc_finds_the_faults():
+    x = _clip_with_faults()
+    (report,) = nodes.NovaShotQC().check(x, 24.0)["result"]
+    r = json.loads(report)
+    kinds = {i["kind"] for i in r["issues"]}
+    assert {"frozen", "jump", "flicker"} <= kinds
+    frozen = next(i for i in r["issues"] if i["kind"] == "frozen")
+    assert frozen["start"] == 9 and frozen["end"] == 11
+    assert r["frames"] == 30 and r["score"] < 80
+    assert len(r["curves"]["motion"]) == 29
+
+
+def test_shot_qc_passes_a_clean_clip():
+    base = _smooth(4) * 0.8 + 0.1
+    x = _pan(base, 24)
+    out = nodes.NovaShotQC().check(x, 24.0)
+    r = json.loads(out["ui"]["text"][0])
+    assert r["score"] == 100 and r["issues"] == []

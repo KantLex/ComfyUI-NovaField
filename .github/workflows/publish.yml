@@ -1,0 +1,37 @@
+# Publishes the pack to the Comfy Registry whenever the version in pyproject.toml changes.
+# This file only runs in the standalone pack repo (GitHub reads workflows from the repo root),
+# not inside the NovaField app repo where it lives as a subfolder.
+#
+# Setup, once: create a publishing API key on https://registry.comfy.org for your publisher,
+# then add it to this repo's secrets as REGISTRY_ACCESS_TOKEN.
+name: Publish to the Comfy Registry
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["pyproject.toml"]
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run the pack's tests
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install numpy pytest
+          pytest -q
+      # Until the Registry key is added, releases stop after the tests instead of failing here.
+      - name: Check for the Registry key
+        id: key
+        env:
+          TOKEN: ${{ secrets.REGISTRY_ACCESS_TOKEN }}
+        run: echo "set=$([ -n "$TOKEN" ] && echo yes || echo no)" >> "$GITHUB_OUTPUT"
+      - if: steps.key.outputs.set == 'yes'
+        uses: Comfy-Org/publish-node-action@1.0.1
+        with:
+          personal_access_token: ${{ secrets.REGISTRY_ACCESS_TOKEN }}

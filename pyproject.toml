@@ -1,6 +1,6 @@
 [project]
 name = "comfyui-novafield"
-version = "0.3.0"
+version = "0.4.0"
 description = "NovaField nodes for ComfyUI: ghost-rig camera guide videos (with stand-ins and follow cams), film stock and lens looks, keyframed box/ellipse track masks and contact sheets. Pure torch + numpy, no extra requirements."
 license = { file = "LICENSE" }
 requires-python = ">=3.10"
