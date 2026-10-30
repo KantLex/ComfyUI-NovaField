@@ -40,7 +40,7 @@ def retime(images: torch.Tensor, multiplier: int = 1, shutter_angle: float = 180
         lo = max(0, int(math.ceil((t - half) * m - 1e-6)))
         hi = min(S - 1, int(math.floor((t + half) * m + 1e-6)))
         if hi < lo:  # a closed shutter, or a window between sub-frames: the nearest sub-frame
-            lo = hi = min(S - 1, max(0, int(round(t * m))))
+            lo = hi = min(S - 1, max(0, int(math.floor(t * m + 0.5))))  # half-up, so strides stay regular
         out[i] = images[lo : hi + 1, ..., :3].float().mean(0)
         if progress:
             progress(i + 1, n_out)

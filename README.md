@@ -1,8 +1,11 @@
 # ComfyUI-NovaField
 
-Custom nodes for the NovaField app: camera-motion carrier videos, film and lens looks, keyframed
-track masks and contact sheets. The shared spec is `docs/contract.md` in the NovaField repo; the
-app compiles ComfyUI graphs against these class names and reimplements the same camera math.
+Custom nodes for the NovaField app: camera-motion carrier videos, film and lens looks, colour
+matching between shots, shutter motion blur and speed changes, a shot health check, keyframed track
+masks and contact sheets. They work in any ComfyUI workflow too.
+
+The shared spec is `docs/contract.md` in the NovaField repo; the app compiles ComfyUI graphs against
+these class names and reimplements the same maths for its live previews.
 
 Pure **torch + numpy + standard library**. There is nothing to pip install.
 
@@ -13,15 +16,7 @@ Any of these works; nothing extra needs to be pip-installed. The nodes appear un
 
 - **From the NovaField app:** any locked feature (Ghost rig, Film lab, Replace) shows an
   **Install NovaField nodes** button. It installs through ComfyUI Manager and restarts ComfyUI for you.
-- **ComfyUI Manager:** open Manager → Custom Nodes Manager, search for **NovaField**, click
-  Install, then restart ComfyUI.
-- **comfy-cli:**
-
-  ```bash
-  comfy node install comfyui-novafield
-  ```
-
-- **From GitHub:** in Manager choose **Install via Git URL** and paste
+- **ComfyUI Manager:** choose **Install via Git URL** and paste
   `https://github.com/KantLex/ComfyUI-NovaField`. Manager treats Git-URL installs as high-risk,
   so you may first need to lower its security level (Manager → settings).
 - **By hand:** clone into ComfyUI's `custom_nodes` folder and restart ComfyUI:
@@ -32,6 +27,20 @@ Any of these works; nothing extra needs to be pip-installed. The nodes appear un
 
   For the ComfyUI desktop app on Windows, `custom_nodes` is inside the install folder, for
   example `C:\Users\<you>\AppData\Local\Comfy-Desktop\ComfyUI-Installs\ComfyUI\ComfyUI\custom_nodes`.
+
+The pack isn't on the Comfy Registry yet, so searching for it in Manager or installing it with
+`comfy node install` doesn't find it.
+
+**Update:** in ComfyUI Manager open **Custom Nodes Manager**, find **ComfyUI-NovaField**, click
+**Update** and restart ComfyUI. Or `git pull` in its folder and restart.
+
+| Version | What's new |
+|---|---|
+| 0.4.2 | `NovaShutter`: with the shutter closed, a frame halfway between two sub-frames now takes the later one, so frames stay evenly spaced (Python's `round()` alternated) |
+| 0.4.1 | Test fix only (the fixture check now allows last-digit float differences between platforms) |
+| 0.4.0 | `NovaMatchColor`, `NovaShutter`, `NovaShotQC` |
+| 0.3.0 | Nine more film stocks in `NovaLensFilm`, colour controls and grain size |
+| 0.2.0 | `NovaGhostRig`, `NovaLensFilm`, `NovaBoxTrackMask`, `NovaContactSheet` |
 
 ## Nodes
 
@@ -113,6 +122,62 @@ grey (the Wan VACE `control_video` format), or the mask as RGB when no `images` 
 ### NovaContactSheet
 Inputs: `images`, `columns` (4), `count` (8), `cell_width` (320). Output: `sheet` `[1, rows·cell_h, columns·cell_w, 3]`.
 It samples `count` frames evenly (first and last included) and tiles them row by row, with no gutters.
+
+### NovaMatchColor: colour continuity (0.4.0)
+Gives a clip the colour of another shot, so the cut between them doesn't jump.
+
+| input | type | notes |
+|---|---|---|
+| `images` | IMAGE | the clip |
+| `reference` | IMAGE | a frame (or frames) of the shot to match |
+| `amount` | FLOAT 0–1 | how far to go (default 1) |
+| `colour_only` | BOOLEAN | match the colour but keep the clip's own brightness and contrast |
+
+Output: `images` with the same shape.
+
+* It moves the mean and spread of L\*, a\* and b\* (CIELAB, D65) from the clip onto the reference's.
+* The clip's statistics are measured over the **whole clip**, so every frame gets the same
+  correction and nothing flickers.
+* Spreads are scaled by at most 2× either way, so a flat or odd reference can't blow a clip apart.
+* Frames run in chunks of 16. `amount` 0 returns the input unchanged.
+
+### NovaShutter: motion blur and speed (0.4.0)
+Real shutter motion blur, and smooth slow motion or speed-ups. Put `FrameInterpolate` (FILM) in
+front of it, and give it the same `multiplier`.
+
+| input | type | notes |
+|---|---|---|
+| `images` | IMAGE | frames interpolated `multiplier` times |
+| `multiplier` | INT 1–16 | the interpolation multiplier used before this node (default 4) |
+| `shutter_angle` | FLOAT 0–360 | 180 is the film standard; 0 keeps every frame sharp; 360 is the softest |
+| `speed` | FLOAT 0.1–4 | 1 is real time, 0.5 half speed, 2 double |
+
+Outputs: `images` at the clip's own frame rate, and `frame_count` INT.
+
+* Each output frame averages the sub-frames inside its exposure window: `shutter_angle / 360` of a
+  frame, centred on the frame's time.
+* The window scales with `speed`, as a real camera's would, so slow motion stays crisp.
+* At half speed the clip gets twice as many frames; the interpolated frames keep it smooth. Sound
+  isn't touched here; if you change the speed, leave the audio out of `CreateVideo`.
+* With `multiplier` 1 it still works (no interpolation): blur then mixes whole frames.
+
+### NovaShotQC: shot health check (0.4.0)
+Finds the faults AI video tends to have, without any model, in a few seconds.
+
+Inputs: `images`, `fps` (default 24). Output: `report` STRING (JSON). It's an output node, so it
+also shows the report in the ComfyUI interface and in the prompt's history.
+
+| fault | what it means |
+|---|---|
+| `frozen` | the picture stops while the rest of the clip moves |
+| `jump` | one frame lurches or morphs much more than the motion around it |
+| `flicker` | the brightness pops for a frame (a steady change, like something dark sliding in, isn't flicker) |
+| `soft` | focus drops for two frames or more |
+| `blown` | more than 5% of the picture clipped to white |
+| `crushed` | more than 35% of the picture pure black (night scenes are meant to be dark) |
+
+The report has a `score` out of 100, each issue with its frames and severity, and brightness,
+motion and sharpness curves. The exact thresholds and format are in the contract.
 
 ## Stand-ins and follow (contract §1b)
 
